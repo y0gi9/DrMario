@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dr. Mario Fixed</title>
+    <style>
+        body { 
+            background: #1a1a1a; 
+            color: white; 
+            font-family: 'Arial Rounded', Arial;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #gameContainer { 
+            display: flex; 
+            gap: 20px; 
+            margin-top: 20px;
+        }
+        canvas { 
+            border: 3px solid #333; 
+            background: #000;
+        }
+        .stats { 
+            background: #333; 
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px;
+        }
+        #settingsPanel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #444;
+            display: none;
+        }
+        .speed-control {
+            margin: 10px 0;
+        }
+        button {
+            background: #444;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>DR. MARIO</h1>
+    <div id="gameContainer">
+        <div>
+            <canvas id="playerBoard" width="240" height="480"></canvas>
+            <div class="stats">Score: <span id="playerScore">0</span></div>
+        </div>
+    </div>
+
+    <script>
+        const GRID_WIDTH = 8, GRID_HEIGHT = 16, CELL_SIZE = 30;
+        const COLORS = ['#FF2222', '#2222FF', '#FFFF22'];
+        
+        let gameSettings = {
+            baseSpeed: 1000,
+            softDropSpeed: 50,
+            isSoftDropping: false
+        };
+
+        class GameBoard {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.grid = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(null));
+                this.currentPill = null;
+                this.score = 0;
+                this.lastDrop = 0;
+                this.spawnPill();
+            }
+
+            spawnPill() {
+                this.currentPill = {
+                    x: 3, y: 0,
+                    colors: [COLORS[Math.floor(Math.random() * 3)], COLORS[Math.floor(Math.random() * 3)]],
+                    rotation: 0
+                };
+            }
+
+            rotatePill() {
+                const original = this.currentPill.rotation;
+                this.currentPill.rotation = (this.currentPill.rotation + 1) % 4;
+                
+                const tests = [{x:0,y:0}, {x:-1,y:0}, {x:1,y:0}, {x:0,y:-1}];
+                for (const test of tests) {
+                    if (this.isValidPosition(this.currentPill.x + test.x, this.currentPill.y + test.y)) {
+                        this.currentPill.x += test.x;
+                        this.currentPill.y += test.y;
+                        return;
+                    }
+                }
+                this.currentPill.rotation = original;
+            }
+
+            isValidPosition(x, y) {
+                const [dx, dy] = this.getOffset();
+                return x >= 0 && x+dx >= 0 && x < GRID_WIDTH && x+dx < GRID_WIDTH &&
+                       y < GRID_HEIGHT && y+dy < GRID_HEIGHT &&
+                       !this.grid[y][x] && !this.grid[y+dy][x+dx];
+            }
+
+            getOffset() {
+                switch(this.currentPill?.rotation % 4) {
+                    case 0: return [1,0]; case 1: return [0,1];
+                    case 2: return [-1,0]; case 3: return [0,-1];
+                }
+                return [0,0];
+            }
+
+            update(timestamp) {
+                if (!this.currentPill) return;
+
+                const dropSpeed = gameSettings.isSoftDropping 
+                    ? gameSettings.softDropSpeed 
+                    : gameSettings.baseSpeed;
+
+                if (timestamp - this.lastDrop > dropSpeed) {
+                    if (this.isValidPosition(this.currentPill.x, this.currentPill.y + 1)) {
+                        this.currentPill.y++;
+                        this.lastDrop = timestamp;
+                    } else {
+                        this.placePill();
+                        if (this.grid[0][3] || this.grid[0][4]) {
+                            alert('GAME OVER! Score: ' + this.score);
+                            this.currentPill = null;
+                            return;
+                        }
+                        this.spawnPill();
+                    }
+                }
+                this.draw();
+            }
+
+            placePill() {
+                const [dx, dy] = this.getOffset();
+                this.grid[this.currentPill.y][this.currentPill.x] = this.currentPill.colors[0];
+                this.grid[this.currentPill.y+dy][this.currentPill.x+dx] = this.currentPill.colors[1];
+                this.checkMatches();
+            }
+
+            checkMatches() {
+                let matches = [];
+                
+                // Horizontal matches
+                for(let y = 0; y < GRID_HEIGHT; y++) {
+                    for(let x = 0; x < GRID_WIDTH - 3; x++) {
+                        if (this.grid[y][x] && 
+                            this.grid[y][x] === this.grid[y][x+1] && 
+                            this.grid[y][x] === this.grid[y][x+2] &&
+                            this.grid[y][x] === this.grid[y][x+3]) {
+                            matches.push(...[[x,y], [x+1,y], [x+2,y], [x+3,y]]);
+                        }
+                    }
+                }
+
+                // Vertical matches
+                for(let x = 0; x < GRID_WIDTH; x++) {
+                    for(let y = 0; y < GRID_HEIGHT - 3; y++) {
+                        if (this.grid[y][x] && 
+                            this.grid[y][x] === this.grid[y+1][x] && 
+                            this.grid[y][x] === this.grid[y+2][x] &&
+                            this.grid[y][x] === this.grid[y+3][x]) {
+                            matches.push(...[[x,y], [x,y+1], [x,y+2], [x,y+3]]);
+                        }
+                    }
+                }
+
+                if(matches.length > 0) {
+                    matches.forEach(([x,y]) => this.grid[y][x] = null);
+                    this.score += matches.length * 100;
+                    document.getElementById('playerScore').textContent = this.score;
+                    this.applyGravity();
+                }
+            }
+
+            applyGravity() {
+                for(let x = 0; x < GRID_WIDTH; x++) {
+                    for(let y = GRID_HEIGHT-1; y >= 0; y--) {
+                        if(!this.grid[y][x]) {
+                            let fallY = y;
+                            while(fallY > 0 && !this.grid[fallY][x]) fallY--;
+                            if(this.grid[fallY][x]) {
+                                this.grid[y][x] = this.grid[fallY][x];
+                                this.grid[fallY][x] = null;
+                            }
+                        }
+                    }
+                }
+                this.checkMatches();
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw grid
+                this.grid.forEach((row, y) => row.forEach((color, x) => {
+                    if(color) {
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(x*CELL_SIZE, y*CELL_SIZE, CELL_SIZE-1, CELL_SIZE-1);
+                    }
+                }));
+
+                // Draw current pill
+                if(this.currentPill) {
+                    const [dx, dy] = this.getOffset();
+                    this.ctx.fillStyle = this.currentPill.colors[0];
+                    this.ctx.fillRect(this.currentPill.x*CELL_SIZE, this.currentPill.y*CELL_SIZE, CELL_SIZE-1, CELL_SIZE-1);
+                    this.ctx.fillStyle = this.currentPill.colors[1];
+                    this.ctx.fillRect((this.currentPill.x+dx)*CELL_SIZE, (this.currentPill.y+dy)*CELL_SIZE, CELL_SIZE-1, CELL_SIZE-1);
+                }
+            }
+        }
+
+        // Initialize game
+        const playerBoard = new GameBoard('playerBoard');
+
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            if(!playerBoard.currentPill) return;
+
+            switch(e.key) {
+                case 'ArrowLeft':
+                    if(playerBoard.isValidPosition(playerBoard.currentPill.x-1, playerBoard.currentPill.y)) {
+                        playerBoard.currentPill.x--;
+                    }
+                    break;
+                case 'ArrowRight':
+                    if(playerBoard.isValidPosition(playerBoard.currentPill.x+1, playerBoard.currentPill.y)) {
+                        playerBoard.currentPill.x++;
+                    }
+                    break;
+                case 'ArrowDown':
+                    gameSettings.isSoftDropping = true;
+                    break;
+                case 'ArrowUp':
+                    playerBoard.rotatePill();
+                    break;
+                case ' ':
+                    while(playerBoard.isValidPosition(playerBoard.currentPill.x, playerBoard.currentPill.y+1)) {
+                        playerBoard.currentPill.y++;
+                    }
+                    playerBoard.placePill();
+                    break;
+            }
+            playerBoard.draw();
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if(e.key === 'ArrowDown') {
+                gameSettings.isSoftDropping = false;
+            }
+        });
+
+        // Game loop
+        function gameLoop(timestamp) {
+            playerBoard.update(timestamp);
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
